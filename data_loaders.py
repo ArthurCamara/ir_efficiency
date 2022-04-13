@@ -5,8 +5,38 @@ import random
 import torch
 from tqdm.auto import tqdm
 
+from indexed_reader import IndexedReader
 
-class IRDatasetsLoader(Dataset):
+
+class BaseLoader:
+    def __init__(self):
+        raise NotImplementedError()
+        pass
+
+    def __len__(self):
+        return len(self.q_ids)
+
+    def cross_encoder_batcher(self, batch):
+        texts = []
+        labels = []
+        for data in batch:
+            texts.append([data["query_text"], data["doc_text"]])
+            texts.append([data["query_text"], data["neg_text"]])
+            labels.append(1.0)
+            labels.append(0.0)
+
+        tokenized = self.tokenizer(
+            texts,
+            padding=True,
+            truncation=True,
+            return_tensors="pt",
+            max_length=512,
+        )
+        labels = torch.tensor(labels, dtype=torch.float)
+        return tokenized, labels
+
+
+class IRDatasetsLoader(Dataset, BaseLoader):
     def __init__(self, tokenizer, qrels):
         self.data = ir_datasets.load("msmarco-document/train")
         self.tokenizer = tokenizer
@@ -34,30 +64,8 @@ class IRDatasetsLoader(Dataset):
         }
         return ret_dict
 
-    def __len__(self):
-        return len(self.q_ids)
 
-    def cross_encoder_batcher(self, batch):
-        texts = []
-        labels = []
-        for data in batch:
-            texts.append([data["query_text"], data["doc_text"]])
-            texts.append([data["query_text"], data["neg_text"]])
-            labels.append(1.0)
-            labels.append(0.0)
-
-        tokenized = self.tokenizer(
-            texts,
-            padding=True,
-            truncation=True,
-            return_tensors="pt",
-            max_length=512,
-        )
-        labels = torch.tensor(labels, dtype=torch.float)
-        return tokenized, labels
-
-
-class InMemoryLoader(Dataset):
+class InMemoryLoader(Dataset, BaseLoader):
     def __init__(self, tokenizer, docs_path, queries_path, qrels):
         self.tokenizer = tokenizer
         self.docs = {}
@@ -91,24 +99,33 @@ class InMemoryLoader(Dataset):
         }
         return ret_dict
 
-    def __len__(self):
-        return len(self.q_ids)
 
-    def cross_encoder_batcher(self, batch):
-        texts = []
-        labels = []
-        for data in batch:
-            texts.append([data["query_text"], data["doc_text"]])
-            texts.append([data["query_text"], data["neg_text"]])
-            labels.append(1.0)
-            labels.append(0.0)
+class IndexedLoader(Dataset, BaseLoader):
+    def __init__(self, tokenizer, doc_path, queries_path, qrels):
+        self.tokenizer = tokenizer
+        self.queries = {}
+        self.all_doc_ids = []
 
-        tokenized = self.tokenizer(
-            texts,
-            padding=True,
-            truncation=True,
-            return_tensors="pt",
-            max_length=512,
-        )
-        labels = torch.tensor(labels, dtype=torch.float)
-        return tokenized, labels
+        self.docs = IndexedReader("msmarco", doc_path)
+        self.all_doc_ids = self.docs.all_ids
+        for line in tqdm(open(queries_path), desc="reading queries", total=367013, leave=False):
+            d_id, doc = line.strip().split("\t", maxsplit=1)
+            self.queries[d_id] = doc
+        self.train_qrels = pytrec_eval.parse_qrel(open(qrels))
+        self.q_ids = dict(enumerate(self.train_qrels.keys()))
+
+    def __getitem__(self, item):
+        q_id = self.q_ids[item]
+        d_id = list(self.train_qrels[q_id].keys())[0]
+        neg_id = random.choice(self.all_doc_ids)
+        if neg_id == d_id:
+            neg_id = random.choice(self.all_doc_ids)
+        pos_doc = self.docs[d_id]
+        neg_doc = self.docs[d_id]
+        query_text = self.queries[q_id]
+        ret_dict = {
+            "query_text": query_text,
+            "doc_text": pos_doc,
+            "neg_text": neg_doc,
+        }
+        return ret_dict

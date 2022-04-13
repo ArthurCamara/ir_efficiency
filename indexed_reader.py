@@ -3,12 +3,13 @@ import logging
 import os
 import pickle
 import mmap
-from accelerate import Accelerator
-from typing import List, Optional, Union
+from typing import Optional, Union
 
 from tqdm.auto import tqdm
 
-from utils import DATA_HOME, g_path, rawcount
+from utils import g_path, rawcount
+
+DATA_HOME = "./data/"
 
 
 class IndexedReader:
@@ -21,8 +22,6 @@ class IndexedReader:
         force: bool = False,
         n_lines: Optional[int] = None,
         split_str: str = "\t",
-        in_memory: bool = False,
-        simple_tsv: bool = False,
     ):
         """Defines a class for dealing with indexed files
         Args:
@@ -38,31 +37,16 @@ class IndexedReader:
         self.current_index = 0
         self.dataset_name = dataset_name
         self.dataset_path = dataset_path
-        self.in_memory = in_memory
-        self.simple_tsv = simple_tsv
         self.index_as_id = index_as_id
         self.cache_path = g_path(DATA_HOME, cache_path)
         self.from_redis = False
         self.force = force
         self.n_lines = n_lines
         self.split_str = split_str
-        self.docs_only = False
 
         if not self.n_lines:
             self.n_lines = rawcount(dataset_path)
-
-        if not self.in_memory:
-            self._create_index()
-        else:
-            self._load_in_memory()
-
-    def to_memory(self):
-        """Add all data to memory, instead of disk. This will make it faster to iterate, with less disk access
-        Alternativally, move your csv to RAMDisk (i.e. /dev/shm/)"""
-        self.data = {}
-        for d_id in tqdm(self.all_ids, desc=f"Loading {self.dataset_name}", ncols=120, total=self.n_lines, leave=False):
-            self.data[d_id] = self[d_id]
-        self.in_memory = True
+        self._create_index()
 
     def _create_index(self):
         """Create in-memory index for the reader file and Saves a copy to disk.
@@ -134,24 +118,6 @@ class IndexedReader:
         pickle.dump(self.index, open(index_file, "wb"))
         self.all_ids = list(self.index.keys())
 
-    def _load_in_memory(self):
-        """Instead of loading data from a file every read, load everythinhg into memory"""
-        self.data = {}
-        pbar = tqdm(desc=f"Loading {self.dataset_name}", ncols=120, total=self.n_lines, leave=False)
-        for idx, line in enumerate(open(self.dataset_path, "rb")):
-            c_line = line.decode("utf-8")
-            pbar.update()
-            if c_line[0] == "#":
-                continue
-
-            if self.simple_tsv:
-                self.data[idx] = c_line.strip()
-                continue
-
-            s, doc = c_line.split("\t", maxsplit=1)
-            self.data[s] = doc
-        pbar.close()
-
     def __getitem__(self, object_id: Union[str, int]) -> str:
         """Gets an item from the dataset, either in memory or from a file
         Args:
@@ -159,11 +125,7 @@ class IndexedReader:
         Returns:
             A string with the full document content, and new lines replaced as spaces.
         """
-        if self.docs_only:
-            object_id = self.all_ids[object_id]
-        if self.in_memory:
-            return self.data[object_id]
-        elif object_id not in self.index:
+        if object_id not in self.index:
             return ""
 
         start_position, n_lines = self.index[object_id]
@@ -186,24 +148,7 @@ class IndexedReader:
             # This works here because we actually one have one line. But beware it may break on othere scenarios!
             return lines[0]
 
-    def get_raw(self, object_id: Union[str, int], index: Optional[int] = None) -> List[str]:
-        """Get item from position index without processing"""
-        if self.simple_tsv and self.in_memory:
-            return [self.data[object_id]]
-        start_position, n_lines = self.index[object_id]
-        self.reader.seek(start_position)
-        lines = []
-        for _ in range(n_lines):
-            c_line = self.reader.readline().decode("utf-8").strip()
-            if index:
-                lines.append(c_line.split()[index])
-            else:
-                lines.append(c_line)
-        return lines
-
     def __len__(self):
-        if self.in_memory:
-            return len(self.data)
         return len(self.index)
 
     def __iter__(self):

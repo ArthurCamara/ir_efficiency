@@ -21,9 +21,7 @@ qrels_path = "/ssd2/arthur/MsMarcoTREC/qrels/msmarco-doctrain-qrels.tsv"
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument(
-        "--loader", type=str, choices=["ir_datasets", "indexed_reader", "in_memory"], default="in_memory"
-    )
+    parser.add_argument("--loader", type=str, choices=["ir_datasets", "indexed", "in_memory"], default="indexed")
     parser.add_argument("--parallel", type=str, choices=["accelerator", "DataParallel"], default="DataParallel")
     parser.add_argument("--n_gpus", type=int, default=2)
     parser.add_argument("--n_steps", type=int, default=1000)

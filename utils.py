@@ -4,6 +4,13 @@ from typing import List
 import numpy as np
 
 
+def g_path(*argv: str):
+    """short hand for creating a new path properly
+    args:
+        argv: vector of strings to join into a path"""
+    return os.path.join(*argv)
+
+
 def get_free_gpus(n_gpus: int = 2, forced_used: List[int] = []):
     """Searches how many free GPUs you have, and make only n_gpus available
     Quite useful if multiple users are running the same machine,
