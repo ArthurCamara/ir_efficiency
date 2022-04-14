@@ -1,10 +1,13 @@
 """Run a time experiment"""
 
 from model import CrossEncoderTrainer
-from data_loaders import IRDatasetsLoader, InMemoryLoader
+from data_loaders import IRDatasetsLoader, InMemoryLoader, IndexedLoader
+
+
 import os
 import argparse
 import logging
+import accelerator as ac
 from utils import get_free_gpus
 from transformers import AutoTokenizer
 import wandb
@@ -33,24 +36,26 @@ def main():
 
     tokenizer = AutoTokenizer.from_pretrained(args.base_model, max_length=512)
     if args.loader == "ir_datasets":
-        train_dataset = IRDatasetsLoader(tokenizer, qrels_path)
-    elif args.loader == "indexed_reader":
-        pass
+        train_dataset = IRDatasetsLoader(tokenizer, docs_path, queries_path, qrels_path)
+    elif args.loader == "indexed":
+        train_dataset = IndexedLoader(tokenizer, docs_path, queries_path, qrels_path)
     elif args.loader == "in_memory":
         train_dataset = InMemoryLoader(tokenizer, docs_path, queries_path, qrels_path)
 
-    experiment_name = f"{args.loader}_{args.base_model}_{args.parallel}"
-    wandb.init(
-        project="ir_efficiency",
-        entity="acamara",
-        reinit=True,
-        name=experiment_name,
-        config=args,
-    )
+    n_gpus = len(used_gpus)
+    experiment_name = f"{args.loader}_{args.base_model}_{args.parallel}_{n_gpus}"
 
     accelerator = args.parallel.lower() == "accelerator"
     if not accelerator:
         args.batch_per_gpu = len(used_gpus) * args.batch_per_gpu
+    if not accelerator or ac.Accelerator().is_main_process:
+        wandb.init(
+            project="ir_efficiency",
+            entity="acamara",
+            reinit=True,
+            name=experiment_name,
+            config=args,
+        )
 
     trainer = CrossEncoderTrainer(experiment_name, args.base_model, accelerator)
     trainer.fit(train_dataset, n_steps=args.n_steps, train_batch_size=args.batch_per_gpu)

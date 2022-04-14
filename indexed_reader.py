@@ -39,6 +39,7 @@ class IndexedReader:
         self.dataset_path = dataset_path
         self.index_as_id = index_as_id
         self.cache_path = g_path(DATA_HOME, cache_path)
+        os.makedirs(self.cache_path, exist_ok=True)
         self.from_redis = False
         self.force = force
         self.n_lines = n_lines

@@ -20,7 +20,7 @@ def get_free_gpus(n_gpus: int = 2, forced_used: List[int] = []):
 
     os.system("nvidia-smi -q -d Memory |grep -A4 GPU|grep Free >/tmp/gpus")
     memory_available = np.array([int(x.split()[2]) for x in open("/tmp/gpus", "r").readlines()])
-    good_gpus = list((np.array(memory_available) > 11100).nonzero()[0])
+    good_gpus = list((np.array(memory_available) > 3000).nonzero()[0])
     if len(forced_used) > 0:
         good_gpus = [g for g in good_gpus if g in forced_used]
     if len(good_gpus) == 0:

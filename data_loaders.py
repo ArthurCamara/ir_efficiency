@@ -37,7 +37,8 @@ class BaseLoader:
 
 
 class IRDatasetsLoader(Dataset, BaseLoader):
-    def __init__(self, tokenizer, qrels):
+    def __init__(self, tokenizer, docs_path, queries_path, qrels):
+        del (docs_path, queries_path)
         self.data = ir_datasets.load("msmarco-document/train")
         self.tokenizer = tokenizer
         # Get all doc ids. Not optimal. But we are not measuring this here.
@@ -121,7 +122,7 @@ class IndexedLoader(Dataset, BaseLoader):
         if neg_id == d_id:
             neg_id = random.choice(self.all_doc_ids)
         pos_doc = self.docs[d_id]
-        neg_doc = self.docs[d_id]
+        neg_doc = self.docs[neg_id]
         query_text = self.queries[q_id]
         ret_dict = {
             "query_text": query_text,

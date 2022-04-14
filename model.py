@@ -1,5 +1,4 @@
 import time
-from datetime import datetime
 from os import PathLike
 from typing import Iterable, Type, Union
 
@@ -78,8 +77,6 @@ class CrossEncoderTrainer:
         n_steps: int = 1000,
         lr: float = 2e-5,
     ) -> None:
-        if self.is_main:
-            start_time = datetime.now()
         sec_per_batch = []
         train_loader = DataLoader(train_dataset, batch_size=train_batch_size, shuffle=True)
         train_loader.collate_fn = train_dataset.cross_encoder_batcher
@@ -115,6 +112,11 @@ class CrossEncoderTrainer:
             if global_step > n_steps:
                 break
             pbar.update()
+            if not self.accelerator:
+                for k in features.keys():
+                    features[k] = features[k].to(self.device)
+                labels = labels.to(self.device)
+
             loss = self.model(**features, labels=labels)
 
             if self.use_accelerator:
@@ -133,4 +135,4 @@ class CrossEncoderTrainer:
                 mem_used = psutil.Process().memory_info().rss / 1024**2
                 wandb.log({"pid_mem": mem_used})
                 wandb.log({"step_time": time_elapsed / 1e9})
-            wandb.log({"avg_time_per_batch": np.mean(sec_per_batch)})
+        wandb.run.summary["avg_time_per_batch"] = np.mean(sec_per_batch)
