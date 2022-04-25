@@ -133,3 +133,4 @@ wandb/
 data/
 # traces
 log/
+.vscode
