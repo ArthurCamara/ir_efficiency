@@ -38,26 +38,30 @@ class BaseLoader:
 
 class IRDatasetsLoader(Dataset, BaseLoader):
     def __init__(self, tokenizer, docs_path, queries_path, qrels):
-        del (docs_path, queries_path)
+        del docs_path  # We don't need this here
         self.data = ir_datasets.load("msmarco-document/train")
+        # Forces to download data if not here yet.
+        _ = self.data._path()
         self.tokenizer = tokenizer
-        # Get all doc ids. Not optimal. But we are not measuring this here.
-        self.all_doc_ids = [d.doc_id for d in tqdm(self.data.docs_iter(), total=3213835, leave=False)]
-        # self.all_query_ids = [q.query_id for q in self.data.queries_iter()]
+        self.num_docs = 3213835
+
+        for line in tqdm(open(queries_path), desc="reading queries", total=367013, leave=False):
+            d_id, doc = line.strip().split("\t", maxsplit=1)
+            self.queries[d_id] = doc
+
         self.train_qrels = pytrec_eval.parse_qrel(open(qrels))
         self.q_ids = dict(enumerate(self.train_qrels.keys()))
 
     def __getitem__(self, item):
         q_id = self.q_ids[item]
         d_id = list(self.train_qrels[q_id].keys())[0]
-        neg_id = random.choice(self.all_doc_ids)
-        if neg_id == d_id:
-            neg_id = random.choice(self.all_doc_ids)
+        neg_id = random.randrange(self.num_docs)
         pos_doc_obj = self.data.docs.lookup(d_id)
         pos_doc = f"{pos_doc_obj.url} {pos_doc_obj.title} {pos_doc_obj.body}"
-        neg_doc_obj = self.data.docs.lookup(neg_id)
+        neg_doc_obj = self.data.docs[neg_id]
+
         neg_doc = f"{neg_doc_obj.url} {neg_doc_obj.title} {neg_doc_obj.body}"
-        query_text = self.data.queries.lookup(q_id).text
+        query_text = self.queries[q_id]
         ret_dict = {
             "query_text": query_text,
             "doc_text": pos_doc,

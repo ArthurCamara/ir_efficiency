@@ -1,6 +1,6 @@
 import time
 from os import PathLike
-from typing import Iterable, Type, Union
+from typing import Iterable, Optional, Type, Union
 
 import numpy as np
 import psutil
@@ -13,7 +13,6 @@ from torch.optim import Optimizer
 from torch.utils.data import DataLoader
 from tqdm.auto import tqdm
 from transformers import AutoConfig, AutoModel, PreTrainedModel
-
 import wandb
 
 
@@ -45,15 +44,20 @@ class CrossEncoderTrainer:
         experiment_name: str,
         model_name: Union[str, PathLike] = "distilbert-base-uncased",
         accelerator: bool = False,
-        device: int = 0,
+        n_gpus: int = 2,
+        use_wandb: bool = True,
     ) -> None:
+
+        self.use_wandb = use_wandb
         self.is_main = True
         self.use_accelerator = accelerator
+
         if self.use_accelerator:
             kwargs_handlers = [DistributedDataParallelKwargs(find_unused_parameters=False)]
             self.accelerator = Accelerator(kwargs_handlers=kwargs_handlers)
             if not self.accelerator.is_main_process:
                 self.is_main = False
+
         self.name = experiment_name
         self.all_losses = []
 
@@ -62,10 +66,12 @@ class CrossEncoderTrainer:
             self.model = CrossEncoderModel(self.model_config)
             self.device = self.accelerator.device
         else:
-            self.model = nn.DataParallel(CrossEncoderModel(self.model_config))
-            self.device = torch.device("cuda:{}".format(device))
+            self.model = CrossEncoderModel(self.model_config)
+            if n_gpus > 1:
+                self.model = nn.DataParallel(self.model)
+            self.device = torch.device("cuda")
             self.model.to(self.device)
-        if self.is_main:
+        if self.use_wandb:
             wandb.watch(self.model)
 
     def fit(
@@ -76,11 +82,20 @@ class CrossEncoderTrainer:
         train_batch_size: int = 16,
         n_steps: int = 1000,
         lr: float = 2e-5,
+        profiler: Optional[Type[torch.profiler.profile]] = None,
+        pin_memory: bool = False,
+        num_workers: int = 0,
     ) -> None:
         sec_per_batch = []
-        train_loader = DataLoader(train_dataset, batch_size=train_batch_size, shuffle=True)
+
+        train_loader = DataLoader(
+            train_dataset,
+            batch_size=train_batch_size,
+            shuffle=True,
+            pin_memory=pin_memory,
+            num_workers=num_workers,
+        )
         train_loader.collate_fn = train_dataset.cross_encoder_batcher
-        # dev_loader = DataLoader(dev_dataset, batch_size=train_batch_size * 10, shuffle=True)
 
         optimizer_params = {"lr": lr}
         param_optimizer = list(self.model.named_parameters())
@@ -104,6 +119,7 @@ class CrossEncoderTrainer:
         number_of_samples = 0
 
         # train for a fixed ammount of steps, not epochs.
+
         pbar = tqdm(desc="Training", total=n_steps, ncols=90, disable=disable_tqdm)
         for features, labels in train_loader:
             step_start = time.perf_counter_ns()
@@ -112,7 +128,7 @@ class CrossEncoderTrainer:
             if global_step > n_steps:
                 break
             pbar.update()
-            if not self.accelerator:
+            if not self.use_accelerator:
                 for k in features.keys():
                     features[k] = features[k].to(self.device)
                 labels = labels.to(self.device)
@@ -120,19 +136,25 @@ class CrossEncoderTrainer:
             loss = self.model(**features, labels=labels)
 
             if self.use_accelerator:
-                self.accelerator.backward((loss))
-                self.accelerator.clip_grad_norm_(self.mode.parameters(), 1.0)
+                self.accelerator.backward(loss)
+                self.accelerator.clip_grad_norm_(self.model.parameters(), 1.0)
             else:
-                loss = loss.mean()
+                loss = loss.mean(dim=0)
                 loss.backward()
                 torch.nn.utils.clip_grad_norm_(self.model.parameters(), 1.0)
             optimizer.step()
             optimizer.zero_grad()
+            # if profiler is not None:
+            profiler.step()
             time_elapsed = time.perf_counter_ns() - step_start
-            if self.is_main:
+            if self.is_main and self.use_wandb:
                 sec_per_batch.append(time_elapsed / 1e9)
                 wandb.log({"loss": loss.item()})
-                mem_used = psutil.Process().memory_info().rss / 1024**2
+                mem_used = psutil.Process().memory_info().rss // 1024**2
                 wandb.log({"pid_mem": mem_used})
                 wandb.log({"step_time": time_elapsed / 1e9})
-        wandb.run.summary["avg_time_per_batch"] = np.mean(sec_per_batch)
+        if self.is_main and self.use_wandb:
+            wandb.run.summary["avg_time_per_batch"] = np.mean(sec_per_batch)
+        if profiler is not None:
+            profiler.stop()
+            print(profiler.key_averages().table(sort_by="cpu_time_total", row_limit=10))
