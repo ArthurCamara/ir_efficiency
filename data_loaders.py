@@ -44,8 +44,8 @@ class IRDatasetsLoader(Dataset, BaseLoader):
         _ = self.data._path()
         self.tokenizer = tokenizer
         self.num_docs = 3213835
-
-        for line in tqdm(open(queries_path), desc="reading queries", total=367013, leave=False):
+        self.queries = {}
+        for line in tqdm(open(queries_path), desc="reading queries", total=367013, leave=False, ncols=90):
             d_id, doc = line.strip().split("\t", maxsplit=1)
             self.queries[d_id] = doc
 
@@ -77,12 +77,12 @@ class InMemoryLoader(Dataset, BaseLoader):
         self.queries = {}
         self.all_doc_ids = []
         # load all docs in memory
-        for line in tqdm(open(docs_path), desc="reading docs", total=3213835, leave=False):
+        for line in tqdm(open(docs_path), desc="reading docs", total=3213835, leave=False, ncols=90):
             d_id, doc = line.strip().split("\t", maxsplit=1)
             self.all_doc_ids.append(d_id)
             self.docs[d_id] = doc
 
-        for line in tqdm(open(queries_path), desc="reading queries", total=367013, leave=False):
+        for line in tqdm(open(queries_path), desc="reading queries", total=367013, leave=False, ncols=90):
             d_id, doc = line.strip().split("\t", maxsplit=1)
             self.queries[d_id] = doc
         self.train_qrels = pytrec_eval.parse_qrel(open(qrels))
@@ -113,7 +113,7 @@ class IndexedLoader(Dataset, BaseLoader):
 
         self.docs = IndexedReader("msmarco", doc_path)
         self.all_doc_ids = self.docs.all_ids
-        for line in tqdm(open(queries_path), desc="reading queries", total=367013, leave=False):
+        for line in tqdm(open(queries_path), desc="reading queries", total=367013, leave=False, ncols=90):
             d_id, doc = line.strip().split("\t", maxsplit=1)
             self.queries[d_id] = doc
         self.train_qrels = pytrec_eval.parse_qrel(open(qrels))

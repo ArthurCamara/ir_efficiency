@@ -10,11 +10,15 @@ import torch
 import accelerate as ac
 from utils import get_free_gpus
 from transformers import AutoTokenizer
+from transformers import logging as t_logging
 import wandb
 
 os.environ["PYTHONHASHSEED"] = "42"
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 os.environ["OMP_NUM_THREADS"] = "1"
+
+# stop complaining about unused imported weights
+t_logging.set_verbosity_error()
 
 # not used for ir_axioms
 docs_path = "/ssd2/arthur/MsMarcoTREC/docs/msmarco-docs.tsv"
@@ -43,7 +47,7 @@ def main():
         ),
     )
     parser.add_argument("--n_gpus", type=int, default=2, help="number of GPUs to use")
-    parser.add_argument("--n_steps", type=int, default=500, help="total number of steps to run")
+    parser.add_argument("--n_steps", type=int, default=1000, help="total number of steps to run")
     parser.add_argument("--learning_rate", type=float, default=1e-5, help="learning rate")
     parser.add_argument("--base_model", type=str, default="distilbert-base-uncased", help="Base ranker miodel")
     parser.add_argument("--batch_per_gpu", type=int, default=8, help="batch size for each GPU")
@@ -69,9 +73,13 @@ def main():
     experiment_name = f"{args.loader}_{args.base_model}_{args.parallel}_{n_gpus}"
     prof = None
     tokenizer = AutoTokenizer.from_pretrained(args.base_model, max_length=512)
-    args.ramdisk = True
     if args.ramdisk:
         os.environ["IR_DATASETS_HOME"] = "/dev/shm"
+        experiment_name += "_ramdisk"
+    if args.num_workers > 0:
+        experiment_name += f"{args.num_workers}_workers"
+    if args.pin_memory:
+        experiment_name += "_pin_memory"
 
     # This is ugly, but enforces that ir_Datasets will read dataset from /dev/shm if needed
     from data_loaders import IRDatasetsLoader, InMemoryLoader, IndexedLoader
@@ -84,6 +92,10 @@ def main():
     elif args.loader == "in_memory":
         train_dataset = InMemoryLoader(tokenizer, docs_path, queries_path, qrels_path)
     if args.profile:
+        print(
+            "Running with profiler. "
+            "Be aware that jobs with too many steps (i.e. too big json traces) can break TensorBoard!"
+        )
         prof = torch.profiler.profile(
             activities=[torch.profiler.ProfilerActivity.CPU, torch.profiler.ProfilerActivity.CUDA],
             on_trace_ready=torch.profiler.tensorboard_trace_handler(f"./log/{experiment_name}"),
@@ -92,6 +104,7 @@ def main():
 
     use_wandb = False
     if (not accelerator or ac.Accelerator().is_main_process) and not args.profile:
+        print(f"Running experiment with name {experiment_name} and logging to wandb.ai")
         use_wandb = True
         wandb.init(
             project="ir_efficiency",
@@ -108,7 +121,14 @@ def main():
         n_gpus=args.n_gpus,
         use_wandb=use_wandb,
     )
-    trainer.fit(train_dataset, n_steps=args.n_steps, train_batch_size=args.batch_per_gpu, profiler=prof)
+    trainer.fit(
+        train_dataset,
+        n_steps=args.n_steps,
+        train_batch_size=args.batch_per_gpu,
+        profiler=prof,
+        pin_memory=args.pin_memory,
+        num_workers=args.num_workers,
+    )
 
 
 if __name__ == "__main__":

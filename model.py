@@ -144,8 +144,8 @@ class CrossEncoderTrainer:
                 torch.nn.utils.clip_grad_norm_(self.model.parameters(), 1.0)
             optimizer.step()
             optimizer.zero_grad()
-            # if profiler is not None:
-            profiler.step()
+            if profiler is not None:
+                profiler.step()
             time_elapsed = time.perf_counter_ns() - step_start
             if self.is_main and self.use_wandb:
                 sec_per_batch.append(time_elapsed / 1e9)
