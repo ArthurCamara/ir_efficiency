@@ -21,9 +21,9 @@ os.environ["OMP_NUM_THREADS"] = "1"
 t_logging.set_verbosity_error()
 
 # not used for ir_axioms
-docs_path = "/ssd2/arthur/MsMarcoTREC/docs/msmarco-docs.tsv"
-queries_path = "/ssd2/arthur/MsMarcoTREC/queries/msmarco-doctrain-queries.tsv"
-qrels_path = "/ssd2/arthur/MsMarcoTREC/qrels/msmarco-doctrain-qrels.tsv"
+docs_path = os.path.join(os.environ["DATA_HOME"], "msmarco-docs.tsv")
+queries_path = os.path.join(os.environ["DATA_HOME"], "msmarco-doctrain-queries.tsv")
+qrels_path = os.path.join(os.environ["DATA_HOME"], "msmarco-doctrain-qrels.tsv")
 
 
 def main():
